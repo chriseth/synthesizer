@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::{BufRead, BufReader, BufWriter, Read},
+    io::{BufRead, BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     rc::Rc,
@@ -80,29 +80,26 @@ pub fn run_solver_on_cnf(
 ) -> Result<SolverResult, String> {
     let mut solver = Command::new(&solver_conf.binary_path);
     let solver = solver.args(&solver_conf.options);
-    let mut solver = 
-    // if solver_conf.request_proof {
-    //     solver.arg(proof_file.path().to_str().unwrap())
-    // } else {
-        solver
-//    }
-    .stdout(Stdio::piped())
-    .spawn()
-    .unwrap();
-
-    let stdin = solver.stdin.as_mut().unwrap();
-    let var_map = to_dimacs(BufWriter::new(stdin), cnf);
-    let stdout = solver.stdout.take().unwrap();
-    let parsed_output = parse_output(stdout, &var_map, timeout)?;
-    solver.wait().unwrap();
-    if let Some(result) = parsed_output {
-        Ok(SolverResult::Sat(result))
-    // } else if solver_conf.request_proof {
-    //     let proof = read_proof(proof_file.path(), &var_map)?;
-    //     Ok(SolverResult::Unsat(Some(proof)))
+    let solver = if solver_conf.request_proof {
+        solver.args(&["-", "-"])
     } else {
-        Ok(SolverResult::Unsat(None))
-    }
+        solver
+    };
+
+    let mut solver = solver
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                format!("Solver not found: {}", solver_conf.binary_path)
+            }
+            _ => e.to_string(),
+        })?;
+
+    let var_map = to_dimacs(solver.stdin.unwrap(), cnf);
+    let mut stdout = solver.stdout.take().unwrap();
+    parse_output(&mut stdout, &var_map, solver_conf.request_proof, timeout)
 }
 
 fn nonempty_items(items: &str) -> impl Iterator<Item = &'_ str> {
@@ -114,10 +111,13 @@ fn nonempty_items(items: &str) -> impl Iterator<Item = &'_ str> {
 fn parse_output(
     output: impl Read,
     var_map: &HashMap<u32, String>,
+    parse_proof: bool,
     timeout: Option<Duration>,
-) -> Result<Option<HashMap<String, bool>>, String> {
+) -> Result<SolverResult, String> {
     let start = std::time::Instant::now();
     let mut model = HashMap::new();
+    let mut unsat_proof_items = vec![];
+    let mut answered_satisfiable = false;
     for line in BufReader::new(output).lines() {
         if let Some(timeout) = timeout {
             if start.elapsed() > timeout {
@@ -125,14 +125,17 @@ fn parse_output(
             }
         }
         let line = line.unwrap();
-        // print!("{}", line);
         if let Some(comment) = line.strip_prefix("c ") {
             if timeout.is_none() {
                 println!("{comment}");
             }
         } else if let Some(sat) = line.strip_prefix("s ") {
-            if sat != "SATISFIABLE" {
-                return Ok(None);
+            if sat == "SATISFIABLE" {
+                answered_satisfiable = true;
+                // We do not return for "satisfiable" because
+                // the model is provided after the "s" line.
+            } else {
+                return Ok(SolverResult::Unsat(parse_proof.then(|| unsat_proof_items)));
             }
         } else if let Some(vars) = line.strip_prefix("v ") {
             model.extend(
@@ -144,21 +147,7 @@ fn parse_output(
                         (name, v > 0)
                     }),
             );
-        }
-    }
-    Ok(Some(model))
-}
-
-fn read_proof(
-    proof_file_path: &Path,
-    var_map: &HashMap<u32, String>,
-) -> Result<Vec<ProofItem>, String> {
-    let proof_file = fs::File::open(proof_file_path).map_err(|e| e.to_string())?;
-    let mut proof_items = vec![];
-    for line in BufReader::new(proof_file).lines() {
-        //for each `a` line, we get the new clause and then the clauses to resolve on in reverse order.
-        let line = line.map_err(|e| e.to_string())?;
-        if let Some(original) = line.strip_prefix("o ") {
+        } else if let Some(original) = line.strip_prefix("o ") {
             let mut items = nonempty_items(original).map(|s| s.parse::<i32>().unwrap());
             let id = items.next().unwrap() as usize;
             let mut lits = items.collect_vec();
@@ -167,7 +156,7 @@ fn read_proof(
                 .into_iter()
                 .map(|l| to_named_literal(l, var_map))
                 .collect_vec();
-            proof_items.push(ProofItem::OriginalClause(id, clause));
+            unsat_proof_items.push(ProofItem::OriginalClause(id, clause));
         } else if let Some(resolvent) = line.strip_prefix("a ") {
             let mut items = nonempty_items(resolvent);
             let id = items.next().unwrap().parse::<usize>().unwrap();
@@ -181,14 +170,15 @@ fn read_proof(
             assert_eq!(items.next(), Some("l"));
             let mut clause_refs = items.map(|s| s.parse::<usize>().unwrap()).collect_vec();
             assert_eq!(clause_refs.pop(), Some(0));
-            proof_items.push(ProofItem::Resolution(Resolution {
+            unsat_proof_items.push(ProofItem::Resolution(Resolution {
                 id,
                 resolvent: clause,
                 clause_refs,
             }));
         }
     }
-    Ok(proof_items)
+    assert!(answered_satisfiable);
+    Ok(SolverResult::Sat(model))
 }
 
 fn to_named_literal(literal: i32, var_map: &HashMap<u32, String>) -> Literal {
