@@ -1,0 +1,13 @@
+[package]
+name = "synthesizer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+boolean-circuit = "1.0.0"
+clap = { version = "4.5.32", features = ["derive"] }
+itertools = "0.14.0"
+
+[[bin]]
+name = "synthesizer"
+path = "src/main.rs"
