@@ -1,22 +1,32 @@
-use std::path::PathBuf;
+use std::{fs::File, io::Seek};
 
-use clap::{Parser, Subcommand};
+use boolean_circuit::{
+    builder::{reduce_conjunction, reduce_disjunction},
+    file_formats::{aiger::from_aiger, dimacs::from_dimacs},
+    Node,
+};
+use clap::Parser;
+use sat_solver::Solver;
+use synthesizer::synthesize_function;
 
+mod deep_copy;
 mod interpolant;
 mod sat_solver;
+mod synthesizer;
+mod utils;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    /// Location of sat solver binray. Only `cadical` is supported for now.
+    /// Location of sat solver binary. Only `cadical` is supported for now.
     solver: String,
 
-    /// File either in CNF or AIGER format to contain the specification of the function,
+    /// File either in DIMACS or AIGER format to contain the specification of the function,
     /// i.e. a formula that is true if the inputs and outputs match.
     specification: String,
 
-    /// List of variable names that are the inputs of the function to synthesize.
-    inputs: Vec<String>,
+    /// Comma-separated list of variable names that are the inputs of the function to synthesize.
+    inputs: String,
 
     /// Variable name that is the output of the function to synthesize.
     output: String,
@@ -25,36 +35,40 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    // // You can check the value provided by positional arguments, or option arguments
-    // if let Some(name) = cli.name.as_deref() {
-    //     println!("Value for name: {name}");
-    // }
+    let solver = Solver::new(&cli.solver, &["--no-binary", "--frat=1"], true);
 
-    // if let Some(config_path) = cli.config.as_deref() {
-    //     println!("Value for config: {}", config_path.display());
-    // }
+    let mut specification_file = match File::open(&cli.specification) {
+        Err(e) => {
+            eprintln!("Error opening file: {}: {e}", cli.specification);
+            std::process::exit(1);
+        }
+        Ok(s) => s,
+    };
+    let specification_aiger = from_aiger(&specification_file);
+    specification_file.rewind().unwrap();
+    let specification_dimacs = from_dimacs(specification_file);
+    let specification = match (specification_aiger, specification_dimacs) {
+        (Ok(specification), _) => specification,
+        (_, Ok(specification)) => reduce_conjunction(
+            specification
+                .into_iter()
+                .map(|clause| reduce_disjunction(clause.into_iter().map(|l| Node::from(&l)))),
+        ),
+        (Err(aiger_err), Err(dimacs_err)) => {
+            eprintln!("Unsupported file format. Only AIGER and DIMACS are supported.");
+            eprintln!("Error reading AIGER format: {aiger_err}");
+            eprintln!("Error reading CNF format: {dimacs_err}");
+            std::process::exit(1);
+        }
+    };
 
-    // // You can see how many times a particular flag or argument occurred
-    // // Note, only flags can have multiple occurrences
-    // match cli.debug {
-    //     0 => println!("Debug mode is off"),
-    //     1 => println!("Debug mode is kind of on"),
-    //     2 => println!("Debug mode is on"),
-    //     _ => println!("Don't be crazy"),
-    // }
-
-    // // You can check for the existence of subcommands, and if found use their
-    // // matches just as you would the top level cmd
-    // match &cli.command {
-    //     Some(Commands::Test { list }) => {
-    //         if *list {
-    //             println!("Printing testing lists...");
-    //         } else {
-    //             println!("Not printing testing lists...");
-    //         }
-    //     }
-    //     None => {}
-    // }
-
-    // Continued program logic goes here...
+    let inputs = cli.inputs.split(',').map(|s| s.to_string()).collect();
+    let output = cli.output.clone();
+    match synthesize_function(solver, specification, inputs, output) {
+        Err(e) => {
+            eprintln!("Error synthesizing function: {e}");
+            std::process::exit(1);
+        }
+        Ok(fun) => println!("{}", fun.to_string_as_tree()),
+    }
 }

@@ -1,8 +1,6 @@
 use std::{
     collections::HashMap,
-    fs::{self, File},
-    io::{BufRead, BufReader, BufWriter, Read, Write},
-    path::{Path, PathBuf},
+    io::{BufRead, BufReader, Read, Write},
     process::{Command, Stdio},
     rc::Rc,
     time::Duration,
@@ -81,7 +79,7 @@ pub fn run_solver_on_cnf(
     let mut solver = Command::new(&solver_conf.binary_path);
     let solver = solver.args(&solver_conf.options);
     let solver = if solver_conf.request_proof {
-        solver.args(&["-", "-"])
+        solver.args(["-", "-"])
     } else {
         solver
     };
@@ -135,7 +133,9 @@ fn parse_output(
                 // We do not return for "satisfiable" because
                 // the model is provided after the "s" line.
             } else {
-                return Ok(SolverResult::Unsat(parse_proof.then(|| unsat_proof_items)));
+                return Ok(SolverResult::Unsat(
+                    parse_proof.then_some(unsat_proof_items),
+                ));
             }
         } else if let Some(vars) = line.strip_prefix("v ") {
             model.extend(

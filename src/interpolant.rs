@@ -6,7 +6,10 @@ use std::{
 use boolean_circuit::{builder::reduce_disjunction, Literal, Node};
 use itertools::Itertools;
 
-use crate::sat_solver::{run_solver_on_cnf, ProofItem, Resolution, Solver, SolverResult};
+use crate::{
+    sat_solver::{run_solver_on_cnf, ProofItem, Resolution, Solver, SolverResult},
+    utils::simplify,
+};
 
 /// Computes a boolean circuit `f` in the common variables of `left` and `right` such that
 /// `left -> f -> right`.
@@ -113,17 +116,13 @@ impl<'a> ComputeInterpolant<'a> {
             .rev()
             .reduce(|(clause_a, node_a), (clause_b, node_b)| {
                 let pivot = find_pivot(&clause_a, &clause_b);
-                let n = (if self.variables_only_in_left.contains(pivot.var()) {
+                let n = simplify(if self.variables_only_in_left.contains(pivot.var()) {
                     &node_a | &node_b
                 } else if self.symmetric && self.common_variables.contains(pivot.var()) {
-                    // TODO
-                    // (&Node::from(&pivot) & &node_a).simplify()
-                    //     | (&Node::from(&!&pivot) & &node_b).simplify()
-                    (&Node::from(&pivot) & &node_a) | (&Node::from(&!&pivot) & &node_b)
+                    simplify(Node::from(&pivot) & node_a) | simplify(Node::from(&!&pivot) & node_b)
                 } else {
                     &node_a & &node_b
                 });
-                // TODO                .simplify();
                 let resolvent = clause_a
                     .iter()
                     .chain(clause_b.iter())
