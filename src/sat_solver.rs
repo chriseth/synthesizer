@@ -125,10 +125,8 @@ fn parse_output(
             }
         }
         let line = line.unwrap();
-        if let Some(comment) = line.strip_prefix("c ") {
-            if timeout.is_none() {
-                println!("{comment}");
-            }
+        if let Some(_) = line.strip_prefix("c ") {
+            // we ignore comments
         } else if let Some(sat) = line.strip_prefix("s ") {
             if sat == "SATISFIABLE" {
                 answered_satisfiable = true;

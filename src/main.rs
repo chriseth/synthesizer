@@ -2,7 +2,10 @@ use std::{fs::File, io::Seek};
 
 use boolean_circuit::{
     builder::{reduce_conjunction, reduce_disjunction},
-    file_formats::{aiger::from_aiger, dimacs::from_dimacs},
+    file_formats::{
+        aiger::{from_aiger, to_aiger_binary},
+        dimacs::from_dimacs,
+    },
     Node,
 };
 use clap::Parser;
@@ -30,6 +33,9 @@ struct Cli {
 
     /// Variable name that is the output of the function to synthesize.
     output: String,
+
+    /// File to write the synthesized function to.
+    output_file: String,
 }
 
 fn main() {
@@ -69,6 +75,25 @@ fn main() {
             eprintln!("Error synthesizing function: {e}");
             std::process::exit(1);
         }
-        Ok(fun) => println!("{}", fun.to_string_as_tree()),
+        Ok(fun) => {
+            let (vars, gates) = fun.gate_count();
+            println!("Synthesized a function with {gates} gates and {vars} variables.");
+            let output_file = match File::create(&cli.output_file) {
+                Err(e) => {
+                    eprintln!("Error creating file: {}: {e}", &cli.output_file);
+                    std::process::exit(1);
+                }
+                Ok(f) => f,
+            };
+            match to_aiger_binary(output_file, &fun) {
+                Err(e) => {
+                    eprintln!("Error writing AIGER format: {e}");
+                    std::process::exit(1);
+                }
+                Ok(_) => {
+                    println!("Function written to {}.", cli.output_file);
+                }
+            }
+        }
     }
 }

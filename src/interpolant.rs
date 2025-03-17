@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    io::{self, Write},
     time::Duration,
 };
 
@@ -69,12 +70,10 @@ impl<'a> ComputeInterpolant<'a> {
 
     pub fn compute_interpolant(&mut self, proof: Vec<ProofItem>) -> Node {
         let mut last_node = None;
-        println!("Processing proof, which has {} items", proof.len());
+        println!("Processing proof, which has {} items...", proof.len());
+        report_progress(0);
         let len = proof.len();
         for (i, item) in proof.into_iter().enumerate() {
-            if (i + 1) * 100 / len > i * 100 / len && ((i + 1) * 100 / len) % 5 == 0 {
-                println!("Processed {} %", (i + 1) * 100 / len);
-            }
             let clause_id = item.clause_id();
             let node = match &item {
                 ProofItem::OriginalClause(_, clause) => self.process_original_clause(clause),
@@ -83,7 +82,12 @@ impl<'a> ComputeInterpolant<'a> {
             last_node = Some(node.clone());
             self.nodes_for_clause.insert(clause_id, node);
             self.clauses.insert(clause_id, item.clause());
+            if i > 0 && i * 100 / len > (i - 1) * 100 / len {
+                report_progress(i * 100 / len);
+            }
         }
+        report_progress(100);
+        println!();
         last_node.unwrap()
     }
 
@@ -160,6 +164,11 @@ fn find_pivot(a: &[Literal], b: &[Literal]) -> Literal {
     } else {
         panic!("Expected exactly one pivot variable");
     }
+}
+
+fn report_progress(percentage: usize) {
+    print!("\rProcessed {percentage} %");
+    io::stdout().flush().unwrap();
 }
 
 #[cfg(test)]
