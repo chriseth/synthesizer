@@ -141,10 +141,6 @@ impl<'a> ComputeInterpolant<'a> {
     }
 }
 
-fn vars_in_clause(clause: &[Literal]) -> BTreeSet<&str> {
-    clause.iter().map(|l| l.var()).collect()
-}
-
 fn vars_in_clauses(clauses: &[Vec<Literal>]) -> BTreeSet<&str> {
     clauses
         .iter()

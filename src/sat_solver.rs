@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufRead, BufReader, Read},
     process::{Command, Stdio},
     rc::Rc,
     time::Duration,
@@ -28,6 +28,7 @@ impl Solver {
 
 #[derive(Debug)]
 pub enum SolverResult {
+    #[allow(unused)]
     Sat(HashMap<String, bool>),
     Unsat(Option<Vec<ProofItem>>),
 }
@@ -61,6 +62,7 @@ pub struct Resolution {
     pub clause_refs: Vec<usize>,
 }
 
+#[allow(unused)]
 pub fn run_solver_on_circuit(
     node: &Node,
     new_var: &mut impl FnMut() -> String,
